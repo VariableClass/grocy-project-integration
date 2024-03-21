@@ -4,7 +4,7 @@ namespace VariableClass.Integration.GrocyProjects.Services;
 
 public interface IProjectManagementTool
 {
+  Task UpsertChoresAsync(IEnumerable<Chore> chores);
   Task<IEnumerable<ChoreExecution>?> GetChoreExecutionsSinceAsync(DateTimeOffset lastRun);
-  Task RegisterChoreAsync(Chore chore);
-  Task RegisterChoresAsync(IEnumerable<Chore> chores);
+  Task ScheduleChoresAsync(IEnumerable<ChoreSchedule> chores);
 }

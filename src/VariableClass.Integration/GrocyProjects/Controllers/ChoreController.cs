@@ -10,7 +10,22 @@ public class ChoresController(ILogger<ChoresController> logger, ChoreExportServi
     private readonly ILogger<ChoresController> _logger = logger;
     private readonly ChoreExportService _choreExportService = choreExportService;
 
-    [HttpGet(Name = "ExportChores")]
-    public async Task ExportChores()
-        => await _choreExportService.ExportChoresAsync();
+    [HttpGet]
+    [Route("sync")]
+    public async Task SyncChoresAsync()
+    {        
+        // Mark any chores completed since last check as complete
+        await _choreExportService.CompleteChoresAsync();
+
+        // Add any open chores to the project as tasks
+        await _choreExportService.ScheduleChoresAsync();
+    }
+
+    [HttpGet]
+    [Route("fetch")]
+    public async Task FetchChoreUpdatesAsync()
+    {
+        // Update project management with chore master data updates
+        await _choreExportService.FetchChoreUpdatesAsync();
+    }
 }

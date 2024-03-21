@@ -8,24 +8,131 @@ namespace VariableClass.Integration.GrocyProjects.Services.GitHub;
 
 public class GitHub(IOptions<GitHubConfig> config, GitHubClient github) : IProjectManagementTool
 {
+  private const int WaitTimeMs = 1000;
+
   private readonly GitHubConfig _config = config.Value;
   private readonly GitHubClient _github = github;
 
-  public async Task RegisterChoreAsync(Chore chore)
+  public async Task UpsertChoresAsync(IEnumerable<Chore> chores)
   {
-    var issue = new NewIssue($"{chore.Title} ({chore.Room})");
-    issue.Labels.Add(_config.LabelGrocy);
-    issue.Labels.Add($"{_config.LabelChoreIdPrefix}{_config.LabelChoreIdSeparator}{chore.Id}");
-    issue.Assignees.Add(chore.Assignee);
+    var issueRequest = new IssueRequest();
+    issueRequest.Labels.Add(_config.LabelGrocy);
 
-    await _github.Issue.Create(_config.RepositoryOwner, _config.Repository, issue);
+    var choreIssues = await _github.Issue.GetAllForOrganization(_config.RepositoryOwner, issueRequest);
 
-    Thread.Sleep(1000);
+    var issuesToDelete = choreIssues.Where(issue =>
+      !chores.Select(chore => chore.Id).Contains(
+        issue.GetChoreId(_config.LabelChoreIdPrefix, _config.LabelChoreIdSeparator)));
+    
+    foreach (var issueToDelete in issuesToDelete)
+    {
+      await DeleteChoreAsync(issueToDelete);
+    }
 
-    // TODO: Append project metadata
+    foreach (var chore in chores)
+    {
+      var issue = choreIssues.SingleOrDefault(choreIssue =>
+        choreIssue.GetChoreId(_config.LabelChoreIdPrefix, _config.LabelChoreIdSeparator).Equals(chore.Id));
+
+      if (issue == null)
+      {
+        await CreateChoreAsync(chore);
+        return;
+      }
+      
+      await UpdateChoreAsync(issue, chore);
+    }
   }
 
-  public async Task RegisterChoresAsync(IEnumerable<Chore> chores)
+  private async Task CreateChoreAsync(Chore chore)
+  {
+    // Set issue title
+    var issue = new NewIssue($"{chore.Title} ({chore.Room})");
+    
+    // Set issue labels
+    issue.Labels.Add(_config.LabelGrocy);
+    issue.Labels.Add($"{_config.LabelChoreIdPrefix}{_config.LabelChoreIdSeparator}{chore.Id}");
+    
+    // Set issue assignee
+    issue.Assignees.Add(chore.Assignee);
+
+    // TODO: (GraphQL) Set priority
+
+    // TODO: (GraphQL) Set effort
+
+    // Perforem create
+    await _github.Issue.Create(_config.RepositoryOwner, _config.Repository, issue);
+    Thread.Sleep(WaitTimeMs);
+  }
+
+  private async Task UpdateChoreAsync(Issue issue, Chore chore)
+  {
+    var issueUpdate = issue.ToUpdate();
+
+    // Update title
+    var newTitle = $"{chore.Title} ({chore.Room})";
+    var titleUpdated = issue.Title != newTitle;
+    if (titleUpdated)
+    {
+      issueUpdate.Title = newTitle;
+    }
+
+    // Reassign
+    var assigneeUpdated = issue.Assignee.Login != chore.Assignee;
+    if (assigneeUpdated)
+    {
+      issueUpdate.ClearAssignees();
+      issueUpdate.AddAssignee(chore.Assignee);
+    }
+
+    // TODO: (GraphQL) Update priority
+    var priorityUpdated = false;
+
+    // TODO: (GraphQL) Update effort
+    var effortUpdated = false;
+
+    // Return if no changes made
+    if (!titleUpdated && !assigneeUpdated && !priorityUpdated && !effortUpdated)
+    {
+      return;
+    }
+
+    // Perform the update
+    await _github.Issue.Update(
+      _config.RepositoryOwner,
+      _config.Repository,
+      issue.Number,
+      issueUpdate);
+    Thread.Sleep(WaitTimeMs);
+  }
+
+  private async Task OpenChoreAsync(Issue issue, ChoreSchedule choreSchedule)
+  {
+    var issueUpdate = issue.ToUpdate();
+
+    // Set state to open
+    issueUpdate.State = ItemState.Open;
+    
+    // Update assignee
+    issueUpdate.ClearAssignees();
+    issueUpdate.AddAssignee(choreSchedule.Assignee);
+
+    // TODO: (GraphQL) Remove assigned due date
+
+    // TODO: (GraphQL) Remove assigned week
+
+    await _github.Issue.Update(_config.RepositoryOwner, _config.Repository, issue.Number, issueUpdate);
+    Thread.Sleep(WaitTimeMs);
+  }
+
+  private async Task DeleteChoreAsync(Issue issue)
+  {
+    // TODO: (GraphQL) Implement with GraphQL API
+
+    Thread.Sleep(WaitTimeMs);
+  }
+
+  public async Task ScheduleChoresAsync(IEnumerable<ChoreSchedule> choresSchedule)
   {
     var issueRequest = new IssueRequest()
     {
@@ -36,22 +143,21 @@ public class GitHub(IOptions<GitHubConfig> config, GitHubClient github) : IProje
     var openIssues = await _github.Issue.GetAllForOrganization(_config.RepositoryOwner, issueRequest);
 
     // Determine chores to register by excluding those with an ID matching the chore ID label of any open issues
-    var choresToRegister = chores.ExceptBy(
-      openIssues.Select(
-        issue => issue.Labels.Single(
-          label => label.Name.StartsWith(_config.LabelChoreIdPrefix)).Name
-            .Split(_config.LabelChoreIdSeparator)[1]),
-      x => x.Id);
+    var choresToSchedule = choresSchedule.ExceptBy(
+      openIssues
+        .Select(issue => issue.GetChoreId(_config.LabelChoreIdPrefix, _config.LabelChoreIdSeparator)),
+      x => x.ChoreId);
 
-    foreach (var chore in choresToRegister)
+    foreach (var choreSchedule in choresToSchedule)
     {
-      await RegisterChoreAsync(chore);
+      var issue = openIssues.Single(
+        x => x.GetChoreId(_config.LabelChoreIdPrefix, _config.LabelChoreIdSeparator).Equals(choreSchedule.ChoreId));
+      await OpenChoreAsync(issue, choreSchedule);
     }
   }
 
   public async Task<IEnumerable<ChoreExecution>?> GetChoreExecutionsSinceAsync(DateTimeOffset lastRun)
   {
-
     var issueRequest = new IssueRequest()
     {
       State = ItemStateFilter.Closed
@@ -60,7 +166,7 @@ public class GitHub(IOptions<GitHubConfig> config, GitHubClient github) : IProje
 
     var closedIssues = await _github.Issue.GetAllForOrganization(_config.RepositoryOwner, issueRequest);
 
-    // TODO: Get only issues for a given project
+    // TODO: (GraphQL) Get only issues for a given project
 
     ICollection<ChoreExecution>? choreExecutions = null;
 

@@ -6,4 +6,6 @@ public class Chore
     public required string Title { get; set; }
     public required string Assignee { get; set; }
     public required string Room { get; set; }
+    public required string Effort { get; set; }
+    public required string Consequences { get; set; }
 }

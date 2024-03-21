@@ -1,8 +1,8 @@
 namespace VariableClass.Integration.GrocyProjects.Models;
 
-public class ChoreExecution(string choreId, string assignee, DateTimeOffset completed)
+public class ChoreSchedule(string choreId, string assignee, DateTimeOffset due)
 {
     public string ChoreId { get; set; } = choreId;
     public string Assignee { get; set; } = assignee;
-    public DateTimeOffset Completed { get; set; } = completed;
+    public DateTimeOffset Due { get; set; } = due;
 }
